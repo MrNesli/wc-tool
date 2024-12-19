@@ -9,6 +9,8 @@
  *
  * */
 
+#include <ctype.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,24 +18,82 @@
 #include <fcntl.h>
 #include <stdbool.h>
 
+#define MIN_STRING_CAPACITY 1000
+
+// String representation
+typedef struct String {
+    char *content;
+    size_t capacity;
+    size_t full_capacity; // needed for null terminator
+    size_t size;
+} String;
+
+// File representation
 typedef struct File {
     FILE *fptr;
-    char *filename;
-    char *buffer;
-    long buffer_size;
+    String filename;
+    String buffer;
 } File;
 
-long count_lines(File file);
+// TODO: Create a function that prints a string with all the special characters
+
+int get_words(String s);
+int get_lines(File file);
 void usage_error();
 FILE* open_file(const char *filename, const char *mode);
-long count_bytes(FILE *file);
 char* get_file_contents(FILE *file);
+long count_bytes(FILE *file);
+String create_string(char *content);
+String create_empty_string();
+void append_char(String *s, char c);
+void append(String *s, char *s_to_append);
+bool is_empty(String s);
 
 void usage_error() {
     printf("Usage: ccwc -c filename.txt\n");
     printf("-c Number of bytes in a file\n");
     printf("-l Number of lines in a file\n");
     exit(1);
+}
+
+bool is_empty(String s) {
+    return s.size == 0;
+}
+
+String create_string(char *content) {
+    /* Creates a string representation based of a C string */
+    String s = (String) {
+        .content = (char *) calloc(sizeof(char), (MIN_STRING_CAPACITY + 1)),
+        .capacity = MIN_STRING_CAPACITY,
+        .full_capacity = MIN_STRING_CAPACITY + 1,
+        .size = 0,
+    };
+
+    append(&s, content);
+
+    return s;
+}
+
+String create_empty_string() {
+    /* Creates an empty string representation */
+    // NOTE: I'm not sure if this creates '<backslash>0' string terminator by default. If it does, do we need the size to start from 1?
+    String s = (String) {
+        .content = (char *) calloc(sizeof(char), (MIN_STRING_CAPACITY + 1)),
+        .capacity = MIN_STRING_CAPACITY, // + 1 for null terminator character
+        .full_capacity = MIN_STRING_CAPACITY + 1,
+        .size = 0,
+    };
+
+    return s;
+}
+
+void empty_string(String *s) {
+    /* Empties the string representation */
+
+    s->content = (char *) calloc(sizeof(char), (MIN_STRING_CAPACITY + 1));
+    s->capacity = MIN_STRING_CAPACITY;
+    s->full_capacity = MIN_STRING_CAPACITY + 1;
+    s->size = 0;
 }
 
 /*
@@ -47,41 +107,93 @@ void usage_error() {
 * We could split the buffer by spaces, and check if those values are not spaces, and increment words counter
 *
 */
-long count_words(File file) {
-    long words = 0;
-    char *word = "";
-    for (int i = 0; i < file.buffer_size; i++) {
-        if (file.buffer[i] == '\n') {
+int get_words(String s) {
+    /* Parsing all the words out of the String */
+    // TODO: Figure out why the word count is incorrect
+    String current = create_empty_string();
+    int words = 0;
 
+    for (int i = 0; i < s.size; i++) {
+        if (s.content[i] != ' ') {
+            append_char(&current, s.content[i]);
+        }
+        else if (s.content[i] == ' ') {
+            words++;
+            empty_string(&current);
         }
     }
 
-    return lines;
+    return words;
 }
 
-long count_lines(File file) {
-    long lines = 0;
-    for (int i = 0; i < file.buffer_size; i++) {
-        if (file.buffer[i] == '\n') {
+int get_lines(File file) {
+    // What if there is a single line that doesn't have new line character?
+
+    int lines = 0;
+    for (int i = 0; i < file.buffer.size; i++) {
+        if (file.buffer.content[i] == '\n') {
             lines++;
         }
     }
 
-    return lines;
+    return (lines == 0 && file.buffer.size > 0) ? 1 : lines;
 }
 
+void append(String *s, char *s_to_append) {
+    /* Appending the C string into String */
+    
+    // QUESTION: Do we care about new line characters in here?
+    size_t append_length = strlen(s_to_append);
+
+    while (append_length > (s->capacity - s->size)) {
+        printf("[INFO] String to append length = %d; Current capacity = %d; Doubling capacity... Reallocating memory...\n", (int) append_length, (int) s->capacity);
+
+        s->capacity *= 2;
+        s->full_capacity = s->capacity + 1; // Actual capacity with a null terminator
+        if ((s->content = (char *) realloc(s->content, sizeof(char) * s->full_capacity)) == NULL) {
+            perror("Failed to allocate memory for the String");
+        }
+    }
+
+    printf("[INFO] Capacity = %d\n", (int) s->capacity);
+
+    // Concatenate two strings
+    strcat(s->content, s_to_append);
+
+    s->size += append_length;
+}
+
+void append_char(String *s, char c) {
+    /* Basic character appending operation on a String */
+
+    s->size++;
+
+    if (s->size > s->capacity) {
+        s->capacity *= 2;
+        s->full_capacity = s->capacity + 1;
+        if ((s->content = (char *) realloc(s->content, sizeof(char) * s->full_capacity)) == NULL) {
+            perror("Failed to allocate memory for the String");
+        } 
+    }
+
+    s->content[s->size - 1] = c;
+}
+
+
 void file_status(const File file) {
-    printf("File <%s>:\n", file.filename);
+    printf("File <%s>:\n", file.filename.content);
+    printf("----------------\n");
 
     if (file.fptr != NULL) {
-        printf("  Status: Open.\n");
+        printf("Status: Open.\n");
     }
     else {
-        printf("  Status: NULL.\n");
+        printf("Status: NULL.\n");
     }
 
-    printf("  File size: %ld\n", file.buffer_size);
-    printf("  File buffer: %s\n", file.buffer);
+    printf("File size: %ld\n", file.buffer.size);
+    // printf("File buffer: %s\n", file.buffer.content);
+    printf("----------------\n");
 }
 
 FILE* open_file(const char *filename, const char *mode) {
@@ -97,17 +209,16 @@ FILE* open_file(const char *filename, const char *mode) {
 
 File read_file(const char *filename) {
     FILE *fptr = open_file(filename, "r");
-    long buffer_size = count_bytes(fptr);
-    char *buffer = get_file_contents(fptr);
+    String buffer = create_string(get_file_contents(fptr));
+    String sfilename = create_string((char *) filename);
 
     File opened_file = (File) {
         .fptr = fptr,
-        .filename = (char *) filename,
+        .filename = sfilename,
         .buffer = buffer,
-        .buffer_size = buffer_size,
     };
 
-    // file_status(opened_file);
+    file_status(opened_file);
 
     return opened_file;
 }
@@ -147,22 +258,21 @@ int main(int argc, char *argv[])
         printf("Error: Too many arguments...\n");
         usage_error();
     }
-
-    if (argc != 3) {
+    else if (argc != 3) {
         usage_error();
     }
 
-    if (strcmp("-c", argv[1]) == 0) {
-        char *filename = argv[2];
-        File file = read_file(filename);
+    char *filename = argv[2];
+    File file = read_file(filename);
 
-        printf("%ld %s\n", file.buffer_size, filename);
+    if (strcmp("-c", argv[1]) == 0) {
+        printf("%ld %s\n", file.buffer.size, filename);
     }
     else if (strcmp("-l", argv[1]) == 0) {
-        char *filename = argv[2];
-        File file = read_file(filename);
-
-        printf("%ld %s\n", count_lines(file), filename);
+        printf("%d %s\n", (int) get_lines(file), filename);
+    }
+    else if (strcmp("-w", argv[1]) == 0) {
+        printf("%d %s\n", (int) get_words(file.buffer), filename);
     }
     else {
         usage_error();
